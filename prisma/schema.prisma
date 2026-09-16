@@ -1,0 +1,276 @@
+// AI x Moving Image Research Radar — data model
+// Single-user product; schema still models entities as first-class rows
+// (rather than denormalized blobs) so the archive can grow into search,
+// clustering, and "idea constellation" features described in the PRD.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Taxonomy
+// ---------------------------------------------------------------------------
+
+// SQLite has no native enum support in Prisma, so enum-like fields below
+// are plain String columns; allowed values are documented in comments and
+// enforced in application code (see src/lib/taxonomy.ts and src/lib/types.ts).
+
+// TagTier: "CORE" (Tier 1) | "RESEARCH" (Tier 2)
+model Tag {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  tier         String
+  developments DevelopmentTag[]
+  notes        NoteTag[]
+}
+
+// ---------------------------------------------------------------------------
+// Sources & evidence
+// ---------------------------------------------------------------------------
+
+// SourceCategory: "PRIMARY" | "TRADE_PRESS" | "GENERAL_NEWS" | "ACADEMIC" | "LEGAL_POLICY"
+model Source {
+  id             String         @id @default(cuid())
+  name           String         @unique
+  sourceCategory String
+  homepageUrl    String?
+  rssUrl         String?
+  isExcluded     Boolean        @default(false) // e.g. flagged as content farm / low quality
+  notes          String?
+  articles       Article[]
+  createdAt      DateTime       @default(now())
+}
+
+// A single piece of reporting/evidence. Several Articles from different
+// outlets covering the same event are clustered under one Development —
+// "5 developments != 5 URLs" (PRD §14).
+model Article {
+  id                String    @id @default(cuid())
+  headline          String
+  url               String
+  author            String?
+  publicationDate   DateTime?
+  sourceId          String
+  source            Source    @relation(fields: [sourceId], references: [id])
+  isPreprint        Boolean   @default(false)
+  isPeerReviewed    Boolean?  // null = unknown/not applicable
+  primarySourceUrl  String? // e.g. statute, judgment, union agreement, paper DOI
+  primarySourceLabel String? // human label for the primary source link
+  extractedText     String? // where legally/permissibly available
+  developmentId     String?
+  development       Development? @relation(fields: [developmentId], references: [id])
+  createdAt         DateTime  @default(now())
+
+  @@index([developmentId])
+  @@unique([url])
+}
+
+// ---------------------------------------------------------------------------
+// Developments (clustered stories) — the core editorial unit
+// ---------------------------------------------------------------------------
+
+model Development {
+  id        String   @id @default(cuid())
+  title     String
+  eventDate DateTime? // when the underlying event/publication occurred
+
+  // A. Reporting layer — neutral (PRD §3A, §10)
+  whatHappened          String // 2-4 factual sentences
+  whyItMatters           String // 1-3 sentences
+  whereConversationStands String // agreement / disagreement / uncertainty
+  whoIsAffected          String // JSON string array, e.g. ["actors","studios"]
+
+  // B. Research lens — explicit, labeled analysis (PRD §3B)
+  researchLens           String? // analysis/questions, clearly separated from A
+  questionUnderneath     String? // "the question underneath it"
+
+  newMediaForm Boolean @default(false) // PRD §12 special tag
+
+  // Relevance ranking (PRD §13) — each 0-100, weighted total also stored
+  scoreResearchRelevance   Int @default(0)
+  scoreConsequence         Int @default(0)
+  scoreNovelty              Int @default(0)
+  scoreEvidenceQuality      Int @default(0)
+  scoreOriginalReporting    Int @default(0)
+  scoreIntellectualGenerativity Int @default(0)
+  scoreTotal                Int @default(0)
+
+  verificationNote String? // e.g. "I could not independently verify X" (PRD §23)
+
+  articles      Article[]
+  tags          DevelopmentTag[]
+  briefingSlots BriefingDevelopment[]
+  libraryItems  LibraryItem[]
+  weeklyLinks   WeeklyReviewDevelopment[]
+  noteLinks     NoteDevelopmentLink[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model DevelopmentTag {
+  developmentId String
+  tagId         String
+  development   Development @relation(fields: [developmentId], references: [id], onDelete: Cascade)
+  tag           Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([developmentId, tagId])
+}
+
+// ---------------------------------------------------------------------------
+// Morning Briefing (PRD §9-12)
+// ---------------------------------------------------------------------------
+
+model Briefing {
+  id                  String   @id @default(cuid())
+  date                DateTime @unique // one per calendar day
+  stateOfConversation String // 3-5 sentence synthesis paragraph
+  signalBeyondHeadlines String // JSON array of { category, text }
+  researchProvocations  String // JSON array of { category, text } ("What Should Priya Be Thinking About?")
+  sentAt              DateTime?
+  developments        BriefingDevelopment[]
+  createdAt           DateTime @default(now())
+}
+
+// Ordered join table: a Briefing has up to 5 ranked Developments.
+model BriefingDevelopment {
+  briefingId    String
+  developmentId String
+  rank          Int // 1-5
+  briefing      Briefing    @relation(fields: [briefingId], references: [id], onDelete: Cascade)
+  development   Development @relation(fields: [developmentId], references: [id], onDelete: Cascade)
+
+  @@id([briefingId, developmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Library (PRD §15-17)
+// ---------------------------------------------------------------------------
+
+// LibraryStatus: "SAVED" | "READ" | "IMPORTANT" | "USE_FOR_ARTICLE" | "USE_FOR_RESEARCH" | "ARCHIVED"
+model LibraryItem {
+  id            String        @id @default(cuid())
+  developmentId String
+  development   Development   @relation(fields: [developmentId], references: [id])
+  status        String        @default("SAVED")
+  savedAt       DateTime      @default(now())
+  highlights    Highlight[]
+  notes         Note[]
+
+  @@unique([developmentId])
+}
+
+// A highlight always preserves exact passage + provenance (PRD §16).
+model Highlight {
+  id              String      @id @default(cuid())
+  libraryItemId   String
+  libraryItem     LibraryItem @relation(fields: [libraryItemId], references: [id], onDelete: Cascade)
+  exactPassage    String
+  surroundingContext String?
+  sourceUrl       String // article the passage came from
+  sourceLabel     String // e.g. "Variety, Sept 12 2026"
+  annotation      String? // optional user note attached at highlight time
+  notes           Note[]
+  createdAt       DateTime    @default(now())
+}
+
+// NoteType: "ARTICLE" (attached to one development/library item) |
+// "HIGHLIGHT" (attached to one highlight) | "RESEARCH" (independent, may
+// link to several developments)
+model Note {
+  id            String      @id @default(cuid())
+  type          String
+  content       String
+  libraryItemId String?
+  libraryItem   LibraryItem? @relation(fields: [libraryItemId], references: [id], onDelete: Cascade)
+  highlightId   String?
+  highlight     Highlight?   @relation(fields: [highlightId], references: [id], onDelete: Cascade)
+  tags          NoteTag[]
+  developmentLinks NoteDevelopmentLink[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model NoteTag {
+  noteId String
+  tagId  String
+  note   Note @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([noteId, tagId])
+}
+
+// Research notes (type=RESEARCH) may link to several developments beyond
+// the one LibraryItem they might also be attached to.
+model NoteDevelopmentLink {
+  noteId        String
+  developmentId String
+  note          Note        @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  development   Development @relation(fields: [developmentId], references: [id], onDelete: Cascade)
+
+  @@id([noteId, developmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Idea Development Engine & Constellations (PRD §19-20)
+// ---------------------------------------------------------------------------
+
+model IdeaConstellation {
+  id            String   @id @default(cuid())
+  centralQuestion String // e.g. "WHO OWNS A PERFORMANCE AFTER THE BODY LEAVES THE SET?"
+  themeTags     String // JSON array of tag names
+  possibleArgument String?
+  whyNow        String?
+  evidenceIds   String // JSON array of Development ids in library
+  missingResearch String?
+  counterargument String?
+  openingQuestion String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Weekly Research Review (PRD §21)
+// ---------------------------------------------------------------------------
+
+model WeeklyReview {
+  id                String   @id @default(cuid())
+  weekStart         DateTime @unique
+  whatChanged       String // JSON array of strings
+  theConversation   String
+  whereStakeholdersDisagree String
+  whatDisappeared   String
+  yourWeekOfThinking String
+  emergingThreads   String // JSON array of strings
+  possibleArticle   String // JSON: {question, whyNow, sources, existingThinking, missing}
+  watchNextWeek     String // JSON array of strings (max 5)
+  developments      WeeklyReviewDevelopment[]
+  createdAt         DateTime @default(now())
+}
+
+model WeeklyReviewDevelopment {
+  weeklyReviewId String
+  developmentId  String
+  weeklyReview   WeeklyReview @relation(fields: [weeklyReviewId], references: [id], onDelete: Cascade)
+  development    Development  @relation(fields: [developmentId], references: [id], onDelete: Cascade)
+
+  @@id([weeklyReviewId, developmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Settings (single-user)
+// ---------------------------------------------------------------------------
+
+model Settings {
+  id                 Int      @id @default(1)
+  deliveryTime       String   @default("07:00") // HH:mm, user local time
+  timezone           String   @default("America/New_York")
+  recipientEmail     String?
+  weeklyReviewDay    String   @default("FRIDAY")
+  updatedAt          DateTime @updatedAt
+}
