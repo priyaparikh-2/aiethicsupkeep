@@ -1,0 +1,48 @@
+name: AI x Moving Image daily brief
+
+on:
+  schedule:
+    # 11:57 UTC = 6:57am ET / 7:57am EDT — adjust to taste. GitHub Actions
+    # cron is best-effort and can run a few minutes late; avoid :00/:30.
+    - cron: "57 11 * * *"
+    # Fridays only, later in the day, for the weekly review.
+    - cron: "0 13 * * 5"
+  workflow_dispatch: {} # allows manual "Run workflow" from the Actions tab
+
+jobs:
+  daily-brief:
+    if: github.event.schedule == '57 11 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      SMTP_FROM: ${{ secrets.SMTP_FROM }}
+      BRIEFING_RECIPIENT: ${{ secrets.BRIEFING_RECIPIENT }}
+      APP_URL: ${{ secrets.APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run brief:generate
+      - run: npm run brief:send
+
+  weekly-review:
+    if: github.event.schedule == '0 13 * * 5'
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run weekly:generate

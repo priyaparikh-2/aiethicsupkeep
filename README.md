@@ -132,15 +132,16 @@ up so the click-path is short:
 5. **Seed it** (optional, for demo content): run
    `DATABASE_URL="<your pooled string>" npm run db:seed` from your own
    machine once, pointed at the hosted database.
-6. **Schedule the daily brief.** Vercel's serverless functions don't run on
-   their own schedule, so add a [Vercel Cron
-   Job](https://vercel.com/docs/cron-jobs) (a `crons` entry in
-   `vercel.json`) hitting a small API route that calls
-   `generateBriefingForDate` and `sendEmail` — or, simpler, keep running
-   `npm run brief:generate && npm run brief:send` from cron on any machine
-   (your laptop, a cheap VPS, a GitHub Action) with `DATABASE_URL` pointed
-   at the same hosted Postgres. The deployed Vercel app and the cron
-   machine share state through that one database either way.
+6. **Schedule the daily brief.** `.github/workflows/daily-brief.yml` is
+   already in this repo — it runs `brief:generate` + `brief:send` daily and
+   `weekly:generate` on Fridays, using GitHub Actions' own scheduler (not
+   Vercel, which has no free cron). Add these repo secrets under **Settings
+   → Secrets and variables → Actions**: `DATABASE_URL`, `ANTHROPIC_API_KEY`,
+   `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`,
+   `SMTP_FROM`, `BRIEFING_RECIPIENT`, `APP_URL` — same values as the Vercel
+   env vars above. Once the secrets are set, the workflow runs on its own;
+   you can also trigger it manually from the **Actions** tab ("Run
+   workflow") to test it immediately rather than waiting for the schedule.
 
 ## Source policy
 
