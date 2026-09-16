@@ -8,7 +8,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -16,9 +16,10 @@ datasource db {
 // Taxonomy
 // ---------------------------------------------------------------------------
 
-// SQLite has no native enum support in Prisma, so enum-like fields below
-// are plain String columns; allowed values are documented in comments and
-// enforced in application code (see src/lib/taxonomy.ts and src/lib/types.ts).
+// Enum-like fields below are plain String columns (kept portable across
+// Postgres/SQLite rather than using native Postgres enums); allowed values
+// are documented in comments and enforced in application code (see
+// src/lib/taxonomy.ts and src/lib/types.ts).
 
 // TagTier: "CORE" (Tier 1) | "RESEARCH" (Tier 2)
 model Tag {

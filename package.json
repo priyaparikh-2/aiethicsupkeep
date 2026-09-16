@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "prisma migrate deploy && next build",
+    "postinstall": "prisma generate",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
@@ -14,7 +16,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "brief:generate": "tsx scripts/generate-morning-brief.ts",
     "brief:send": "tsx scripts/send-morning-email.ts",
-    "weekly:generate": "tsx scripts/generate-weekly-review.ts"
+    "weekly:generate": "tsx scripts/generate-weekly-review.ts",
+    "brief:preview": "tsx scripts/render-preview-email.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -12,7 +12,7 @@ call goes directly to Anthropic's API using your own key.
 ## Stack
 
 - **Next.js 14 (App Router) + TypeScript** — UI and API routes
-- **Prisma + SQLite** — data model (see `prisma/schema.prisma`)
+- **Prisma + Postgres** — data model (see `prisma/schema.prisma`)
 - **Anthropic API (`claude-sonnet-5`)** — briefing synthesis, idea
   constellations, weekly review, Ask My Archive
 - **`rss-parser`** — best-effort ingestion from the trade/news/academic
@@ -40,16 +40,25 @@ always preserves exact passage + source (never separated from provenance).
 **Note** exists at three levels (ARTICLE / HIGHLIGHT / RESEARCH).
 **IdeaConstellation** and **WeeklyReview** are synthesized from the library.
 
-SQLite has no native Prisma enum support, so enum-like fields (`Tag.tier`,
-`Source.sourceCategory`, `LibraryItem.status`, `Note.type`) are plain
-`String` columns; allowed values are documented as comments in the schema
-and as constants in `src/lib/taxonomy.ts` / `src/lib/types.ts`.
+Enum-like fields (`Tag.tier`, `Source.sourceCategory`, `LibraryItem.status`,
+`Note.type`) are plain `String` columns rather than native Postgres enums,
+kept portable in case you ever want to point this at SQLite for local-only
+use; allowed values are documented as comments in the schema and as
+constants in `src/lib/taxonomy.ts` / `src/lib/types.ts`.
 
-## Setup
+## Setup (local)
+
+You need a Postgres instance. Easiest local option is Docker:
+
+```bash
+docker run -d --name aiethicsupkeep-db -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
+```
+
+Then:
 
 ```bash
 npm install
-cp .env.example .env   # fill in ANTHROPIC_API_KEY and SMTP_* to enable live features
+cp .env.example .env   # set DATABASE_URL to your local Postgres, and ANTHROPIC_API_KEY/SMTP_* to enable live features
 npx prisma migrate dev
 npm run db:seed        # loads example/demo content so the app is usable immediately
 npm run dev
@@ -74,6 +83,7 @@ is configured.
 ```bash
 npm run brief:generate   # fetch RSS candidates -> LLM cluster/score/tag -> save today's Briefing
 npm run brief:send       # render + email the latest Briefing via SMTP
+npm run brief:preview    # render the latest Briefing to a local HTML file, no SMTP needed
 npm run weekly:generate  # Friday (or whenever configured) research review
 ```
 
@@ -94,6 +104,43 @@ Settings page:
 # Weekly review, Friday 8:00am
 0 8 * * 5 cd /path/to/aiethicsupkeep && npm run weekly:generate
 ```
+
+## Deploying to Vercel
+
+This needs your own Vercel account and a hosted Postgres — I can't create
+either of those for you from here (no account access), but the repo is set
+up so the click-path is short:
+
+1. **Get a Postgres instance.** [Neon](https://neon.tech) has a free tier
+   and is the simplest option; Vercel Postgres and Supabase also work.
+   Copy the **pooled** connection string (Neon calls it the "pooled
+   connection" — serverless functions open many short-lived connections,
+   and the direct/unpooled string will exhaust Postgres's connection limit
+   under load).
+2. **Import the repo into Vercel**: vercel.com → Add New → Project → import
+   `priyaparikh-2/aiethicsupkeep` → select the `claude/ai-moving-image-radar-axge3i`
+   branch (or merge it to `main` first).
+3. **Set environment variables** on the Vercel project (Settings →
+   Environment Variables): `DATABASE_URL` (the pooled string from step 1),
+   `ANTHROPIC_API_KEY`, `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`,
+   `BRIEFING_RECIPIENT`, and `APP_URL` (your Vercel deployment URL, e.g.
+   `https://aiethicsupkeep.vercel.app`).
+4. **Deploy.** `vercel.json` in this repo already points the build command
+   at `npm run vercel-build`, which runs `prisma migrate deploy` (applies
+   the schema to your fresh Postgres instance) before `next build`. No
+   manual migration step needed on first deploy.
+5. **Seed it** (optional, for demo content): run
+   `DATABASE_URL="<your pooled string>" npm run db:seed` from your own
+   machine once, pointed at the hosted database.
+6. **Schedule the daily brief.** Vercel's serverless functions don't run on
+   their own schedule, so add a [Vercel Cron
+   Job](https://vercel.com/docs/cron-jobs) (a `crons` entry in
+   `vercel.json`) hitting a small API route that calls
+   `generateBriefingForDate` and `sendEmail` — or, simpler, keep running
+   `npm run brief:generate && npm run brief:send` from cron on any machine
+   (your laptop, a cheap VPS, a GitHub Action) with `DATABASE_URL` pointed
+   at the same hosted Postgres. The deployed Vercel app and the cron
+   machine share state through that one database either way.
 
 ## Source policy
 
